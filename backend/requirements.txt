@@ -5,3 +5,4 @@ searoute
 geopy
 pandas
 xlrd
+pydantic-settings
