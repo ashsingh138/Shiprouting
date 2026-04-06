@@ -1,0 +1,84 @@
+# =========================
+# 🌍 Operating System Files
+# =========================
+.DS_Store
+Thumbs.db
+*.swp
+
+# =========================
+# 🎨 Frontend (React / Vite / Node)
+# =========================
+# Dependencies
+node_modules/
+package-lock.json  # (Optional: Only ignore if you strictly use yarn.lock)
+yarn.lock          # (Optional: Only ignore if you strictly use npm)
+
+# Build outputs
+dist/
+build/
+.next/
+out/
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# =========================
+# 🐍 Backend (Python / FastAPI)
+# =========================
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual Environments
+venv/
+env/
+.env/
+.venv/
+ENV/
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+
+# Testing / Tooling
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.mypy_cache/
+
+# =========================
+# 🔐 Environment Variables (CRITICAL)
+# =========================
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+*.secret
+
+# =========================
+# 💻 IDEs and Editors
+# =========================
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.eclipse/
+
+# =========================
+# 📂 Project Specific / Caches
+# =========================
+# Ignore downloaded data files if they are huge
+app/data/*.csv
+app/data/*.xls
+app/data/*.nc
+
+# (If your weather cache creates local JSON files, ignore them here)
+weather_cache.json
