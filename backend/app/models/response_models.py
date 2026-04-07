@@ -37,7 +37,10 @@ class RouteOptimizationResponse(BaseModel):
     total_crossings: List[Crossing]
     legs: List[RouteLeg]
     status_message: str
-
+    eco_time_hours: float = 0.0
+    eco_fuel_tons: float = 0.0
+    fast_time_hours: float = 0.0
+    fast_fuel_tons: float = 0.0
 # Keep the Port model at the bottom
 class Port(BaseModel):
     id:str

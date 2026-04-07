@@ -1,9 +1,9 @@
 // src/components/Map/TrackerLayer.jsx
 import React from 'react';
-import { Polyline, Marker, Popup, Tooltip } from 'react-leaflet';
+import { Polyline, Marker, Popup, Tooltip, Circle } from 'react-leaflet';
 import L from 'leaflet';
 
-// A custom SVG Ship Icon that we can rotate based on heading
+// 1. Custom SVG Ship Icon
 const createShipIcon = (heading = 0) => {
   return L.divIcon({
     className: 'clear-background',
@@ -19,41 +19,87 @@ const createShipIcon = (heading = 0) => {
   });
 };
 
+// 2. NEW: Clean, professional Start/End Markers
+const createLocationIcon = (type) => {
+  const bgColor = type === 'start' ? '#10b981' : '#ef4444'; // Green for Origin, Red for Dest
+  const label = type === 'start' ? 'A' : 'B';
+  
+  return L.divIcon({
+    className: 'custom-div-icon',
+    html: `
+      <div style="
+        background-color: ${bgColor}; color: white; border-radius: 50%;
+        width: 24px; height: 24px; display: flex; justify-content: center;
+        align-items: center; font-weight: bold; font-size: 12px;
+        border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.4);
+      ">
+        ${label}
+      </div>
+    `,
+    iconSize: [24, 24],
+    iconAnchor: [12, 12],
+    popupAnchor: [0, -12]
+  });
+};
+
 const TrackerLayer = ({ trackingData }) => {
   if (!trackingData || !trackingData.currentLocation) return null;
 
-  const { pastPath, futurePath, currentLocation, shipDetails } = trackingData;
+  const { pastPath, futurePath, currentLocation, shipDetails, stormArea } = trackingData;
+
+  // Extract the exact first and last coordinates
+  const originCoords = pastPath && pastPath.length > 0 ? pastPath[0] : null;
+  const destCoords = futurePath && futurePath.length > 0 ? futurePath[futurePath.length - 1] : null;
 
   return (
     <>
-      {/* 1. PAST PATH (Solid Gray Line) */}
+      {/* PAST PATH */}
       {pastPath && pastPath.length > 0 && (
-        <Polyline 
-          positions={pastPath} 
-          color="#6b7280" 
-          weight={4} 
-          opacity={0.6} 
-        />
+        <Polyline positions={pastPath} color="#6b7280" weight={4} opacity={0.6} />
       )}
 
-      {/* 2. FUTURE PATH (Dashed Blue Line for the weather-optimized route) */}
+      {/* FUTURE PATH */}
       {futurePath && futurePath.length > 0 && (
-        <Polyline 
-          positions={futurePath} 
-          color="#3b82f6" 
-          weight={4} 
-          dashArray="10, 10" 
-          opacity={0.9} 
-        >
+        <Polyline positions={futurePath} color="#3b82f6" weight={4} dashArray="10, 10" opacity={0.9}>
           <Tooltip sticky>Optimized Future Route</Tooltip>
         </Polyline>
       )}
 
-      {/* 3. CURRENT SHIP LOCATION */}
-      <Marker 
-        position={[currentLocation.lat, currentLocation.lon]} 
-        icon={createShipIcon(currentLocation.heading)}
-      >
+      {/* NEW: ORIGIN MARKER (A) */}
+      {originCoords && (
+        <Marker position={originCoords} icon={createLocationIcon('start')}>
+          <Tooltip direction="top" offset={[0, -10]} opacity={1}>
+            <span className="font-bold text-green-700">Origin: {shipDetails?.origin}</span>
+          </Tooltip>
+        </Marker>
+      )}
+
+      {/* NEW: DESTINATION MARKER (B) */}
+      {destCoords && (
+        <Marker position={destCoords} icon={createLocationIcon('end')}>
+          <Tooltip direction="top" offset={[0, -10]} opacity={1}>
+            <span className="font-bold text-red-700">Destination: {shipDetails?.destination}</span>
+          </Tooltip>
+        </Marker>
+      )}
+
+      {/* STORM VISUALIZER */}
+      {stormArea && (
+        <Circle 
+          center={[stormArea.lat, stormArea.lon]} 
+          radius={stormArea.radius}
+          pathOptions={{ 
+            color: '#ef4444', fillColor: '#ef4444', fillOpacity: 0.3, weight: 2, dashArray: "5, 5" 
+          }}
+        >
+          <Popup>
+            <div className="font-bold text-red-700">⚠️ SEVERE CYCLONE ZONE</div>
+          </Popup>
+        </Circle>
+      )}
+
+      {/* CURRENT SHIP LOCATION */}
+      <Marker position={[currentLocation.lat, currentLocation.lon]} icon={createShipIcon(currentLocation.heading)}>
         <Popup className="custom-popup">
           <div className="font-sans">
             <h3 className="font-bold text-lg text-blue-900 border-b pb-1 mb-2">
@@ -62,12 +108,8 @@ const TrackerLayer = ({ trackingData }) => {
             <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm text-gray-700">
               <span className="font-semibold text-gray-500">IMO:</span> 
               <span>{shipDetails?.imo || "N/A"}</span>
-              
               <span className="font-semibold text-gray-500">Speed:</span> 
               <span>{currentLocation.speed_knots} kn</span>
-              
-              <span className="font-semibold text-gray-500">Status:</span> 
-              <span className="text-green-600 font-bold">{currentLocation.status || "Underway"}</span>
             </div>
           </div>
         </Popup>

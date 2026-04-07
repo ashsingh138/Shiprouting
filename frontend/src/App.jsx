@@ -5,7 +5,7 @@ import InputForm from './components/Sidebar/InputForm';
 import StatsPanel from './components/Dashboard/StatsPanel';
 import LiveMonitorPanel from './components/LiveMonitor/LiveMonitorPanel';
 import { useRouteFetch } from './hooks/useRouteFetch';
-
+import VoyageComparison from './components/Sidebar/VoyageComparison';
 // Leaflet marker fix
 import L from 'leaflet';
 import icon from 'leaflet/dist/images/marker-icon.png';
@@ -59,6 +59,7 @@ function App() {
             {activeTab === 'planner' ? (
               <>
                 <InputForm onSubmit={fetchRoute} loading={loading} />
+                <VoyageComparison routeData={routeData} />
                 <StatsPanel routeData={routeData} loading={loading} error={error} />
               </>
             ) : (

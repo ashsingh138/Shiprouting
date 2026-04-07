@@ -7,11 +7,10 @@ const InputForm = ({ onSubmit, loading }) => {
   const [ports, setPorts] = useState([]);
   const [waypoints, setWaypoints] = useState([null, null]);
   
-  // Helper to get local time formatted for the datetime-local input
   const getLocalDatetimeStr = () => {
     const now = new Date();
     now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
-    return now.toISOString().slice(0, 16); // format: YYYY-MM-DDThh:mm
+    return now.toISOString().slice(0, 16); 
   };
 
   const [formData, setFormData] = useState({
@@ -19,7 +18,7 @@ const InputForm = ({ onSubmit, loading }) => {
     fuelConsumption: 30.0,
     fuelWeight: 0.5,
     timeWeight: 0.5,
-    departureTime: getLocalDatetimeStr() // NEW: Track departure time
+    departureTime: getLocalDatetimeStr() 
   });
 
   useEffect(() => {
@@ -30,7 +29,7 @@ const InputForm = ({ onSubmit, loading }) => {
         return {
           value: p, 
           label: p.name, 
-          isoCode: p.isoCode // Passed directly from backend
+          isoCode: p.isoCode 
         };
       });
       setPorts(formatted);
@@ -46,15 +45,23 @@ const InputForm = ({ onSubmit, loading }) => {
     }));
   };
 
+  // NEW: Handle the zero-sum slider for Time vs Fuel
+  const handleWeightSlider = (e) => {
+    const tWeight = parseFloat(e.target.value);
+    setFormData(prev => ({
+      ...prev,
+      timeWeight: tWeight,
+      fuelWeight: parseFloat((1.0 - tWeight).toFixed(1)) // Ensure it adds up to 1.0!
+    }));
+  };
+
   const handleWaypointChange = (index, selectedOption) => {
     const newWaypoints = [...waypoints];
     newWaypoints[index] = selectedOption;
     setWaypoints(newWaypoints);
   };
 
-  const addWaypoint = () => {
-    setWaypoints([...waypoints, null]);
-  };
+  const addWaypoint = () => setWaypoints([...waypoints, null]);
 
   const removeWaypoint = (index) => {
     const newWaypoints = waypoints.filter((_, i) => i !== index);
@@ -86,13 +93,12 @@ const InputForm = ({ onSubmit, loading }) => {
       weights: {
         fuel_weight: formData.fuelWeight,
         time_weight: formData.timeWeight,
-        max_safe_wave_height_meters: 4.0
+        max_safe_wave_height_meters: 4.0 // You can add a slider for this later too!
       }
     };
     onSubmit(payload);
   };
 
-  // NEW: A custom rendering function for the react-select dropdown to show flags!
   const formatOptionLabel = ({ label, isoCode }) => (
     <div className="flex items-center gap-2">
       {isoCode ? (
@@ -103,7 +109,7 @@ const InputForm = ({ onSubmit, loading }) => {
           className="shadow-sm border border-gray-200"
         />
       ) : (
-        <span className="w-5" /> // Placeholder spacing if no flag is found
+        <span className="w-5" /> 
       )}
       <span className="truncate">{label}</span>
     </div>
@@ -124,7 +130,7 @@ const InputForm = ({ onSubmit, loading }) => {
                 options={ports} 
                 value={wp}
                 onChange={(option) => handleWaypointChange(index, option)} 
-                formatOptionLabel={formatOptionLabel} // <-- THIS INJECTS THE FLAGS!
+                formatOptionLabel={formatOptionLabel} 
                 placeholder="Search port..."
                 isClearable
                 className="text-sm"
@@ -133,8 +139,7 @@ const InputForm = ({ onSubmit, loading }) => {
             
             {waypoints.length > 2 && (
               <button 
-                type="button" 
-                onClick={() => removeWaypoint(index)}
+                type="button" onClick={() => removeWaypoint(index)}
                 className="mt-5 p-2 text-red-500 hover:text-red-700 hover:bg-red-50 rounded transition-colors"
                 title="Remove Port"
               >
@@ -145,8 +150,7 @@ const InputForm = ({ onSubmit, loading }) => {
         ))}
         
         <button 
-          type="button" 
-          onClick={addWaypoint}
+          type="button" onClick={addWaypoint}
           className="w-full py-2 border-2 border-dashed border-gray-300 text-gray-600 hover:border-blue-500 hover:text-blue-600 font-semibold rounded text-sm transition-colors"
         >
           + Add New Port
@@ -158,11 +162,8 @@ const InputForm = ({ onSubmit, loading }) => {
         <label className="w-full flex flex-col text-sm text-gray-600">
           Departure Time (Local)
           <input 
-            name="departureTime" 
-            type="datetime-local" 
-            value={formData.departureTime} 
-            onChange={handleChange} 
-            required 
+            name="departureTime" type="datetime-local" value={formData.departureTime} 
+            onChange={handleChange} required 
             className="mt-1 p-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500" 
           />
         </label>
@@ -178,6 +179,39 @@ const InputForm = ({ onSubmit, loading }) => {
           Fuel/Day (Tons)
           <input name="fuelConsumption" type="number" step="0.1" value={formData.fuelConsumption} onChange={handleChange} required className="mt-1 p-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500" />
         </label>
+      </div>
+
+      {/* --------------------------------------------------------- */}
+      {/* THE NEW FEATURE: ROUTE OPTIMIZATION PRIORITY SLIDER */}
+      {/* --------------------------------------------------------- */}
+      <h4 className="text-sm font-semibold text-gray-600 mb-2 mt-4 border-t pt-4">Optimization Priority</h4>
+      <div className="mb-8">
+        <div className="flex justify-between text-xs text-gray-600 font-bold mb-2">
+          <span className={formData.fuelWeight > 0.5 ? "text-green-600" : ""}>
+            🌿 Save Fuel ({Math.round(formData.fuelWeight * 100)}%)
+          </span>
+          <span className={formData.timeWeight > 0.5 ? "text-red-600" : ""}>
+            ⏱️ Save Time ({Math.round(formData.timeWeight * 100)}%)
+          </span>
+        </div>
+        
+        <input 
+          type="range" 
+          min="0" 
+          max="1" 
+          step="0.1" 
+          value={formData.timeWeight} 
+          onChange={handleWeightSlider} 
+          className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+        />
+        
+        <p className="text-xs text-gray-400 mt-2 text-center h-8">
+          {formData.timeWeight > 0.5 
+            ? "Prioritizes the fastest route, potentially burning more fuel." 
+            : formData.timeWeight < 0.5 
+              ? "Prioritizes fuel efficiency, resulting in a longer voyage."
+              : "Perfectly balances voyage duration and fuel consumption."}
+        </p>
       </div>
 
       <button type="submit" disabled={loading} className="w-full py-3 bg-blue-800 hover:bg-blue-900 text-white font-bold rounded transition-colors disabled:bg-blue-400">

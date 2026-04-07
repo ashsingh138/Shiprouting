@@ -5,6 +5,8 @@ import json
 import os
 from typing import List
 import math
+import random
+import searoute
 
 # Import our Pydantic models
 from app.models.request_models import RouteOptimizationRequest
@@ -87,11 +89,16 @@ async def optimize_ship_route(request: RouteOptimizationRequest):
         global_distance = 0.0
         global_time = 0.0
         global_fuel = 0.0
-        current_time = request.departure_time
         
+        # --- NEW: Accumulators for the extremes ---
+        global_time_eco = 0.0
+        global_fuel_eco = 0.0
+        global_time_fast = 0.0
+        global_fuel_fast = 0.0
+        
+        current_time = request.departure_time
         waypoints_output = []
 
-        # LOOP THROUGH EACH WAYPOINT to create "Legs"
         for i in range(len(request.waypoints) - 1):
             start_port = request.waypoints[i]
             end_port = request.waypoints[i+1]
@@ -107,8 +114,7 @@ async def optimize_ship_route(request: RouteOptimizationRequest):
                 leg_time = 0.0
                 leg_fuel = 0.0
                 
-                # NEW: Tracker to prevent spamming the weather API
-                distance_since_last_weather_check = 50.0 # Start at 50 so it triggers on the very first node
+                distance_since_last_weather_check = 50.0 
                 current_weather = {"wave_height_m": 1.0, "wave_direction_deg": 90.0, "wind_speed_knots": 5.0}
                 
                 for j in range(1, len(segment_nodes)):
@@ -119,28 +125,37 @@ async def optimize_ship_route(request: RouteOptimizationRequest):
                     dist_nm = dist_km / 1.852
                     heading = calculate_bearing(prev_lat, prev_lon, curr_lat, curr_lon)
                     
-                    # ---------------------------------------------------------
-                    # THE SPEED FIX: Only check weather every 50 Nautical Miles
-                    # ---------------------------------------------------------
                     distance_since_last_weather_check += dist_nm
                     
                     if distance_since_last_weather_check >= 50.0:
                         current_weather = await weather_client.get_weather_at_point(
-                            lat=curr_lat,
-                            lon=curr_lon,
-                            target_time=current_time
+                            lat=curr_lat, lon=curr_lon, target_time=current_time
                         )
-                        distance_since_last_weather_check = 0.0 # Reset counter
+                        distance_since_last_weather_check = 0.0 
                     
-                    # Calculate speed loss using REAL wave heights and directions
-                    actual_speed = calculate_speed_loss(
-                        calm_speed=request.ship_profile.max_speed_knots, 
-                        wave_height=current_weather["wave_height_m"], 
-                        wave_direction_deg=current_weather["wave_direction_deg"], 
-                        ship_heading_deg=heading
-                    )
+                    # ---------------------------------------------------------
+                    # THE COMPARISON ENGINE: Calculate all 3 scenarios at once!
+                    # ---------------------------------------------------------
                     
+                    # 1. User Choice (Based on Slider)
+                    time_w = request.weights.time_weight
+                    speed_multiplier = 0.6 + (0.4 * time_w)
+                    target_calm_speed = request.ship_profile.max_speed_knots * speed_multiplier
+                    
+                    actual_speed = calculate_speed_loss(target_calm_speed, current_weather["wave_height_m"], current_weather["wave_direction_deg"], heading)
                     fuel = calculate_fuel_consumption(actual_speed, request.ship_profile, dist_nm)
+                    
+                    # 2. ECO Extreme (Fuel Weight = 1.0 -> 0.6x Speed)
+                    actual_speed_eco = calculate_speed_loss(request.ship_profile.max_speed_knots * 0.6, current_weather["wave_height_m"], current_weather["wave_direction_deg"], heading)
+                    global_time_eco += dist_nm / actual_speed_eco
+                    global_fuel_eco += calculate_fuel_consumption(actual_speed_eco, request.ship_profile, dist_nm)
+                    
+                    # 3. FAST Extreme (Time Weight = 1.0 -> 1.0x Speed)
+                    actual_speed_fast = calculate_speed_loss(request.ship_profile.max_speed_knots * 1.0, current_weather["wave_height_m"], current_weather["wave_direction_deg"], heading)
+                    global_time_fast += dist_nm / actual_speed_fast
+                    global_fuel_fast += calculate_fuel_consumption(actual_speed_fast, request.ship_profile, dist_nm)
+                    
+                    # ---------------------------------------------------------
                     
                     leg_dist += dist_nm
                     leg_fuel += fuel
@@ -148,7 +163,6 @@ async def optimize_ship_route(request: RouteOptimizationRequest):
                     leg_time += time_hrs
                     current_time = calculate_eta(current_time, dist_nm, actual_speed)
                     
-                    # Attach the real weather to the waypoint so the frontend can see it
                     waypoints_output.append(Waypoint(
                         lat=curr_lat, lon=curr_lon, eta=current_time,
                         expected_wave_height_m=current_weather["wave_height_m"], 
@@ -158,13 +172,9 @@ async def optimize_ship_route(request: RouteOptimizationRequest):
                 
                 leg_crossings = detect_crossings(segment_nodes)
                 legs_data.append(RouteLeg(
-                    start_port=start_port.name,
-                    end_port=end_port.name,
-                    distance_nm=round(leg_dist, 2),
-                    time_hours=round(leg_time, 2),
-                    fuel_tons=round(leg_fuel, 2),
-                    eta=current_time,
-                    crossings=leg_crossings
+                    start_port=start_port.name, end_port=end_port.name,
+                    distance_nm=round(leg_dist, 2), time_hours=round(leg_time, 2),
+                    fuel_tons=round(leg_fuel, 2), eta=current_time, crossings=leg_crossings
                 ))
                 
                 global_distance += leg_dist
@@ -188,7 +198,12 @@ async def optimize_ship_route(request: RouteOptimizationRequest):
             final_eta=current_time,
             total_crossings=all_crossings,
             legs=legs_data,
-            status_message="Successfully calculated live weather route."
+            status_message="Successfully calculated live weather route.",
+            # Add the new bounds to the response
+            eco_time_hours=round(global_time_eco, 2),
+            eco_fuel_tons=round(global_fuel_eco, 2),
+            fast_time_hours=round(global_time_fast, 2),
+            fast_fuel_tons=round(global_fuel_fast, 2)
         )
 
     except Exception as e:
@@ -223,3 +238,122 @@ async def get_live_ship_location(imo: str):
             "heading": ship_info["last_known_heading"],
             "is_live": False
         }
+
+
+
+# Math Helpers
+def calculate_bearing(lat1, lon1, lat2, lon2):
+    dLon = math.radians(lon2 - lon1)
+    y = math.sin(dLon) * math.cos(math.radians(lat2))
+    x = math.cos(math.radians(lat1)) * math.sin(math.radians(lat2)) - math.sin(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.cos(dLon)
+    brng = math.degrees(math.atan2(y, x))
+    return (brng + 360) % 360
+
+def haversine(lat1, lon1, lat2, lon2):
+    R = 6371
+    dLat = math.radians(lat2 - lat1)
+    dLon = math.radians(lon2 - lon1)
+    a = math.sin(dLat/2)**2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dLon/2)**2
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
+    return R * c
+
+@router.get("/track/{imo}/live-voyage")
+async def get_live_voyage(imo: str):
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    
+    # 1. Load Ship Data
+    with open(os.path.join(base_dir, "data", "ships_db.json"), "r", encoding="utf-8") as f:
+        ships_db = json.load(f)
+
+    ship = next((s for s in ships_db if str(s.get("IMO", "")) == imo or str(s.get("imo", "")) == imo), None)
+    if not ship:
+        raise HTTPException(status_code=404, detail="Ship not found")
+
+    ship_lat = float(ship.get("LAT", ship.get("last_known_lat", 0)))
+    ship_lon = float(ship.get("LON", ship.get("last_known_lon", 0)))
+    ship_heading = float(ship.get("Heading", ship.get("last_known_heading", 511)))
+    ship_speed = float(ship.get("SOG", ship.get("last_known_speed", 12.0)))
+    ship_name = ship.get("VesselName", ship.get("name", "Unknown"))
+
+    if ship_heading == 511 or ship_heading == 0:
+        ship_heading = random.randint(0, 359)
+
+    # 2. Load Ports Data
+    with open(os.path.join(base_dir, "data", "global_ports.json"), "r", encoding="utf-8") as f:
+        all_ports = json.load(f)
+
+    # 3. THE FIX: Smart Routing Validator
+    def find_valid_route(ship_lat, ship_lon, target_heading, is_future=True):
+        candidates = []
+        for port in all_ports:
+            if not port.get('lat') or not port.get('lon'): continue
+            
+            bearing = calculate_bearing(ship_lat, ship_lon, port['lat'], port['lon'])
+            diff = abs(bearing - target_heading)
+            if diff > 180: diff = 360 - diff
+            
+            # Narrow the cone so it stays somewhat linear
+            if diff <= 45:
+                dist = haversine(ship_lat, ship_lon, port['lat'], port['lon'])
+                # Limit to regional voyages (200km - 3500km) to avoid crossing the entire globe
+                if 200 < dist < 3500:
+                    candidates.append((dist, port))
+        
+        # Sort candidates by distance
+        candidates.sort(key=lambda x: x[0])
+        
+        # Test the top 10 closest ports to find one that doesn't cross land
+        for dist, port in candidates[:10]:
+            try:
+                if is_future:
+                    route = searoute.searoute([ship_lon, ship_lat], [port['lon'], port['lat']])
+                else:
+                    route = searoute.searoute([port['lon'], port['lat']], [ship_lon, ship_lat])
+                
+                coords = route['geometry']['coordinates']
+                path = [[lat, lon] for lon, lat in coords]
+                
+                # ANTI-TELEPORTATION CHECK: 
+                # If the first jump from the ship to the ocean network is massive (>250km), 
+                # it means searoute snapped across a continent. Reject this route!
+                if len(path) > 2:
+                    if is_future:
+                        first_jump = haversine(ship_lat, ship_lon, path[1][0], path[1][1])
+                    else:
+                        first_jump = haversine(path[-2][0], path[-2][1], ship_lat, ship_lon)
+                        
+                    if first_jump > 250:
+                        continue # Skip to the next port!
+                
+                return port, path
+            except Exception:
+                continue
+        
+        # Absolute fallback if trapped
+        fallback = candidates[0][1] if candidates else random.choice(all_ports)
+        return fallback, [[ship_lat, ship_lon], [fallback['lat'], fallback['lon']]]
+
+    # 4. Generate Validated Routes
+    dest_port, future_path = find_valid_route(ship_lat, ship_lon, ship_heading, True)
+    origin_port, past_path = find_valid_route(ship_lat, ship_lon, (ship_heading + 180) % 360, False)
+
+    # Guarantee seamless visual connections to the ship
+    if past_path: past_path[-1] = [ship_lat, ship_lon]
+    if future_path: future_path[0] = [ship_lat, ship_lon]
+
+    return {
+        "shipDetails": {
+            "name": ship_name,
+            "imo": imo,
+            "origin": origin_port.get('name', 'Unknown Origin'),
+            "destination": dest_port.get('name', 'Unknown Destination')
+        },
+        "currentLocation": {
+            "lat": ship_lat,
+            "lon": ship_lon,
+            "heading": ship_heading,
+            "speed_knots": ship_speed
+        },
+        "pastPath": past_path,
+        "futurePath": future_path
+    }
